@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Boîte à idées de la classe</title>
+<style>
+:root{--bg:#f4f7fb;--card:#fff;--tx:#1d2733;--mut:#6b7a8c;--acc:#1a73e8;--bd:#dde4ee;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121821;--card:#1b2431;--tx:#e8eef6;--mut:#9aa8b9;--acc:#6aa7ff;--bd:#2c3848}}
+:root[data-theme="dark"]{--bg:#121821;--card:#1b2431;--tx:#e8eef6;--mut:#9aa8b9;--acc:#6aa7ff;--bd:#2c3848}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:640px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.5rem;margin:8px 0 4px}
+p.sub{color:var(--mut);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+label{display:block;font-weight:600;font-size:.9rem;margin:10px 0 4px}
+input,textarea{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:inherit}
+textarea{min-height:110px;resize:vertical}
+button{margin-top:12px;background:var(--acc);color:#fff;border:0;border-radius:10px;padding:11px 18px;font:inherit;font-weight:600;cursor:pointer}
+button:disabled{opacity:.5}
+.badge{display:inline-block;background:var(--acc);color:#fff;font-size:.75rem;border-radius:99px;padding:2px 10px;margin-bottom:8px}
+.idea .meta{color:var(--mut);font-size:.8rem;margin-bottom:6px}
+.idea p{margin:0;white-space:pre-wrap;word-wrap:break-word}
+.ok{color:#188038;font-weight:600;margin-top:10px}
+.err{color:#d93025;margin-top:10px}
+</style>
+</head>
+<body>
+<main>
+  <h1>💡 Boîte à idées de la classe</h1>
+  <p class="sub" id="sub">Chargement…</p>
+  <div id="app"></div>
+</main>
+<script>
+(function(){
+  var app=document.getElementById('app'), sub=document.getElementById('sub');
+  var db=null, isAdmin=false;
+
+  var BAD=['pute','putain','salope','salop','merde','connard','conne','con','enculer','encule','nique','niquer','ntm','fdp','pd','pede','tapette','batard','bite','couille','cul','chatte','zob','sexe','sex','nazi','hitler','fuck','shit','bitch','dick','pussy','asshole','cunt','nigger','nigga','fag','porn','porno','suce','sucer','branleur','bouffon','debile','mongol','trisomique'];
+  function clean(n){
+    var norm=n.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/0/g,'o').replace(/1/g,'i').replace(/3/g,'e').replace(/4/g,'a').replace(/5/g,'s').replace(/\$/g,'s').replace(/@/g,'a').replace(/[^a-z]/g,'');
+    var parts=n.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').split(/[^a-z0-9]+/);
+    for(var i=0;i<BAD.length;i++){
+      var w=BAD[i];
+      if(parts.indexOf(w)>-1||(w.length>=4&&norm.indexOf(w)>-1))return 'Nom censuré';
+    }
+    return n;
+  }
+  function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML}
+
+  function renderForm(){
+    var c=document.createElement('div');c.className='card';
+    c.innerHTML='<label for="nm">Ton prénom (invité)</label><input id="nm" maxlength="40" placeholder="Ex : Léa">'+
+      '<label for="id">Ton idée</label><textarea id="id" maxlength="1000" placeholder="Écris ton idée ici…"></textarea>'+
+      '<button id="go">Envoyer mon idée</button><div id="msg"></div>';
+    app.appendChild(c);
+    var btn=c.querySelector('#go'), msg=c.querySelector('#msg');
+    btn.onclick=async function(){
+      var name=clean(c.querySelector('#nm').value.trim())||'Anonyme';
+      var txt=c.querySelector('#id').value.trim();
+      msg.className='';msg.textContent='';
+      if(!txt){msg.className='err';msg.textContent='Écris une idée avant d\'envoyer.';return}
+      if(!db){msg.className='err';msg.textContent='Connecte-toi avec ton compte invité pour envoyer.';return}
+      btn.disabled=true;
+      try{
+        var uu=await claude.use('user');var uid=await uu.id();
+        var ref=db.collection('ideas').doc(uid);var items=[];
+        try{var sn=await ref.get();if(sn.exists)items=sn.data().items||[]}catch(e){}
+        items.push({text:txt,at:Date.now()});
+        await ref.set({name:name,items:items});
+        c.querySelector('#id').value='';
+        msg.className='ok';msg.textContent='✅ Merci ! Ton idée a été envoyée.';
+      }catch(e){msg.className='err';msg.textContent='Impossible d\'envoyer pour le moment.'}
+      btn.disabled=false;
+    };
+  }
+
+  function renderAdmin(){
+    var h=document.createElement('div');
+    h.innerHTML='<span class="badge">Espace créateurs — seuls vous voyez ces messages</span>';
+    app.appendChild(h);
+    var list=document.createElement('div');list.textContent='Aucune idée pour l\'instant.';
+    app.appendChild(list);
+    db.collection('ideas').onSnapshot(function(snap){
+      var docs=[];
+      snap.docs.forEach(function(d){var x=d.data()||{};(x.items||[]).forEach(function(it){docs.push({name:x.name,text:it.text,at:it.at})})});
+      docs.sort(function(a,b){return (b.at||0)-(a.at||0)});
+      list.innerHTML=docs.length?'':'Aucune idée pour l\'instant.';
+      docs.forEach(function(d){
+        var el=document.createElement('div');el.className='card idea';
+        el.innerHTML='<div class="meta">'+esc(clean(d.name||'Anonyme'))+' · '+new Date(d.at||0).toLocaleString('fr-FR')+'</div><p>'+esc(d.text||'')+'</p>';
+        list.appendChild(el);
+      });
+    },function(){list.textContent='Impossible de charger les idées.'});
+  }
+
+  function render(){
+    app.innerHTML='';
+    if(isAdmin){sub.textContent='Vue créateur : voici les idées reçues.';renderAdmin();}
+    else{sub.textContent='Partage ton idée avec les créateurs de la classe. Elle sera privée : toi seul(e) et eux la verrez.';renderForm();}
+  }
+
+  render();
+  Promise.all([claude.use('db'),claude.use('user')]).then(function(r){
+    db=r[0];var u=r[1];
+    isAdmin=!!(u&&u.canEdit&&u.canEdit());
+    render();
+  }).catch(function(){});
+})();
+</script>
+</body>
+</html>
